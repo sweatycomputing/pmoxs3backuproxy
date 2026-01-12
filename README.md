@@ -73,6 +73,8 @@ Usage of ./pmoxs3backuproxy:
         Server SSL certificate file (default "server.crt")
   -debug
         Debug logging
+  -disable-tagging
+        Disable S3 object tagging (required for S3 providers that don't support tagging)
   -endpoint string
         S3 Endpoint without https/http , host:port
   -key string
@@ -83,6 +85,11 @@ Usage of ./pmoxs3backuproxy:
         Enable SSL connection to the endpoint, for use with cloud S3 providers
 ```
 
+**Note:** Some S3-compatible providers (like Backblaze B2) do not support object tagging.
+If you experience corruption of index.json.blob files or "wrong magic" errors during restore,
+use the `-disable-tagging` flag. When tagging is disabled, the notes and protection features
+will not be available, but backups and restores will work correctly.
+
 ```
 Usage of ./garbagecollector:
   -accesskey string
@@ -91,6 +98,8 @@ Usage of ./garbagecollector:
         Bucket to perform garbage collection on
   -debug
         Debug logging
+  -disable-tagging
+        Disable S3 object tagging (required for S3 providers that don't support tagging)
   -endpoint string
         S3 Endpoint without https/http , host:port
   -lookuptype string

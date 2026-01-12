@@ -23,3 +23,9 @@ go.work.sum
 
 # env file
 .env
+
+# Built binaries (local builds and goreleaser builds)
+pmoxs3backuproxy
+garbagecollector
+pmoxs3backuproxy-*
+garbagecollector-*

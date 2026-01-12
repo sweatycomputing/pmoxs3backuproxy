@@ -13,7 +13,7 @@ import (
 	"github.com/minio/minio-go/v7"
 )
 
-func ListSnapshots(c minio.Client, datastore string, returnCorrupted bool) ([]Snapshot, error) {
+func ListSnapshots(c minio.Client, datastore string, returnCorrupted bool, disableTagging bool) ([]Snapshot, error) {
 	resparray := make([]Snapshot, 0)
 	resparray2 := make([]Snapshot, 0)
 	prefixMap := make(map[string]*Snapshot)
@@ -36,12 +36,14 @@ func ListSnapshots(c minio.Client, datastore string, returnCorrupted bool) ([]Sn
 					if strings.HasSuffix(path[2], ".csjson") {
 						continue
 					}
-					if object.UserTags["protected"] == "true" {
-						existing_S.Protected = true
-					}
-					if object.UserTags["note"] != "" {
-						note, _ := base64.RawStdEncoding.DecodeString(object.UserTags["note"])
-						existing_S.Comment = string(note)
+					if !disableTagging {
+						if object.UserTags["protected"] == "true" {
+							existing_S.Protected = true
+						}
+						if object.UserTags["note"] != "" {
+							note, _ := base64.RawStdEncoding.DecodeString(object.UserTags["note"])
+							existing_S.Comment = string(note)
+						}
 					}
 					existing_S.Files = append(existing_S.Files, SnapshotFile{
 						Filename:  path[2],
@@ -90,8 +92,8 @@ func ListSnapshots(c minio.Client, datastore string, returnCorrupted bool) ([]Sn
 	return resparray2, ctx.Err()
 }
 
-func GetLatestSnapshot(c minio.Client, ds string, id string, time uint64) (*Snapshot, error) {
-	snapshots, err := ListSnapshots(c, ds, false)
+func GetLatestSnapshot(c minio.Client, ds string, id string, time uint64, disableTagging bool) (*Snapshot, error) {
+	snapshots, err := ListSnapshots(c, ds, false, disableTagging)
 	if err != nil {
 		s3backuplog.ErrorPrint(err.Error())
 		return nil, err
@@ -149,7 +151,11 @@ func (S *Snapshot) GetFiles(c minio.Client) {
 	}
 }
 
-func (S *Snapshot) ReadTags(c minio.Client) (map[string]string, error) {
+func (S *Snapshot) ReadTags(c minio.Client, disableTagging bool) (map[string]string, error) {
+	if disableTagging {
+		s3backuplog.DebugPrint("Tagging disabled, returning empty tags")
+		return make(map[string]string), nil
+	}
 	existingTags, err := c.GetObjectTagging(
 		context.Background(),
 		S.Datastore,

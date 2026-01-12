@@ -121,6 +121,7 @@ func main() {
 	insecureFlag := flag.Bool("usessl", false, "Use SSL for endpoint connection: default: false")
 	ticketExpireFlag := flag.Uint64("ticketexpire", 3600, "API Ticket expire time in seconds")
 	lookupTypeFlag := flag.String("lookuptype", "auto", "Bucket lookup type: auto,dns,path")
+	disableTagging := flag.Bool("disable-tagging", false, "Disable S3 object tagging (required for Backblaze B2)")
 	debug := flag.Bool("debug", false, "Debug logging")
 	flag.BoolVar(&printVersion, "version", false, "Show version and exit")
 	flag.BoolVar(&printVersion, "v", false, "Show version and exit")
@@ -143,6 +144,7 @@ func main() {
 		SecureFlag:     *insecureFlag,
 		TicketExpire:   *ticketExpireFlag,
 		LookupTypeFlag: *lookupTypeFlag,
+		DisableTagging: *disableTagging,
 	}
 	srv := &http.Server{Addr: *bindAddress, Handler: S}
 	srv.SetKeepAlivesEnabled(true)
@@ -226,7 +228,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			var ss s3pmoxcommon.Snapshot
 			ss.InitWithQuery(r.URL.Query())
 			ss.Datastore = ds
-			existingTags, err := ss.ReadTags(*C.Client)
+			existingTags, err := ss.ReadTags(*C.Client, s.DisableTagging)
 			if err != nil {
 				w.WriteHeader(http.StatusInternalServerError)
 				w.Write([]byte(err.Error()))
@@ -251,10 +253,21 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			ss.Datastore = ds
 			note := r.FormValue("notes")
 			note = base64.RawStdEncoding.EncodeToString([]byte(note))
-			existingTags, _ := ss.ReadTags(*C.Client)
+
+			if s.DisableTagging {
+				s3backuplog.WarnPrint("Tagging disabled - notes feature unavailable for snapshot: %s", ss.S3Prefix())
+				w.WriteHeader(http.StatusOK)
+				return
+			}
+
+			existingTags, err := ss.ReadTags(*C.Client, s.DisableTagging)
+			if err != nil || existingTags == nil {
+				s3backuplog.DebugPrint("Unable to read existing tags, initializing empty: %v", err)
+				existingTags = make(map[string]string)
+			}
 			existingTags["note"] = note
 			tag, _ = tags.NewTags(existingTags, false)
-			err := C.Client.PutObjectTagging(
+			err = C.Client.PutObjectTagging(
 				context.Background(),
 				ds,
 				ss.S3Prefix()+"/index.json.blob",
@@ -288,7 +301,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			ss.InitWithQuery(r.URL.Query())
 			ss.Datastore = ds
 			w.Header().Add("Content-Type", "application/json")
-			existingTags, err := ss.ReadTags(*C.Client)
+			existingTags, err := ss.ReadTags(*C.Client, s.DisableTagging)
 			if err != nil {
 				w.WriteHeader(http.StatusInternalServerError)
 				w.Write([]byte(err.Error()))
@@ -313,11 +326,21 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			var tag *tags.Tags
 			ss.InitWithForm(r)
 			ss.Datastore = ds
-			existingTags, err := ss.ReadTags(*C.Client)
-			if err != nil {
-				w.WriteHeader(http.StatusInternalServerError)
-				w.Write([]byte(err.Error()))
+
+			if s.DisableTagging {
+				s3backuplog.WarnPrint("Tagging disabled - protection feature unavailable for snapshot: %s", ss.S3Prefix())
+				w.Header().Add("Content-Type", "application/json")
+				resp, _ := json.Marshal(Response{
+					Data: ss,
+				})
+				w.Write(resp)
 				return
+			}
+
+			existingTags, err := ss.ReadTags(*C.Client, s.DisableTagging)
+			if err != nil || existingTags == nil {
+				s3backuplog.DebugPrint("Unable to read existing tags, initializing empty: %v", err)
+				existingTags = make(map[string]string)
 			}
 			tagvalue, ok := existingTags["protected"]
 			if ok {
@@ -401,7 +424,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			if ns != "" {
 				s3backuplog.DebugPrint("Request for namespace: %s", ns)
 			}
-			snapshots, _ := s3pmoxcommon.ListSnapshots(*C.Client, ds, false)
+			snapshots, _ := s3pmoxcommon.ListSnapshots(*C.Client, ds, false, s.DisableTagging)
 			groups := make([]Group, 0)
 			for _, snap := range snapshots {
 				var filelist []string
@@ -496,7 +519,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				id := r.URL.Query().Get("backup-id")
 				bcktype := r.URL.Query().Get("backup-type")
 
-				snapshots, err = s3pmoxcommon.ListSnapshots(*C.Client, ds, false)
+				snapshots, err = s3pmoxcommon.ListSnapshots(*C.Client, ds, false, s.DisableTagging)
 				if err != nil {
 					w.WriteHeader(http.StatusInternalServerError)
 					io.WriteString(w, err.Error())
@@ -536,6 +559,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			*s.SelectedDataStore,
 			s.Snapshot.BackupID,
 			s.Snapshot.BackupTime,
+			s.DisableTagging,
 		)
 		if err != nil {
 			s3backuplog.DebugPrint("Unable to get latest snapshot: [%s]", err.Error())
@@ -564,6 +588,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			*s.SelectedDataStore,
 			s.Snapshot.BackupID,
 			s.Snapshot.BackupTime,
+			s.DisableTagging,
 		)
 		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)

@@ -81,6 +81,7 @@ func main() {
 	flag.BoolVar(&printVersion, "v", false, "Show version and exit")
 
 	lookupTypeFlag := flag.String("lookuptype", "auto", "Bucket lookup type: auto,dns,path")
+	disableTagging := flag.Bool("disable-tagging", false, "Disable S3 object tagging (required for Backblaze B2)")
 	debug := flag.Bool("debug", false, "Debug logging")
 	flag.Parse()
 	if printVersion {
@@ -143,7 +144,7 @@ func main() {
 
 	//Phase 1 Delete backups older than retentionDays
 	s3backuplog.InfoPrint("Fetching snapshots")
-	snapshots, err := s3pmoxcommon.ListSnapshots(*minioClient, *bucketFlag, true)
+	snapshots, err := s3pmoxcommon.ListSnapshots(*minioClient, *bucketFlag, true, *disableTagging)
 	if err != nil {
 		s3backuplog.FatalPrint("Unable to list snapshots: %s", err.Error())
 	}
